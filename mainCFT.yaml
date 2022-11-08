@@ -1,0 +1,212 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: CFT Stack set to deploy automated solution (Create IAM Role inside multiple account to get access, Budget, SNS & Lambda to get notification when budget get exceeds and take action on that notification)
+
+
+Parameters:
+
+  masterAccountID:
+    Description: Master Account Number which other user will assume to get access in another account
+    Type: String
+
+  crossAccountRoleName:
+    Description: 'Your Role Name need to be the same across all of the Member Accounts'
+    Type: String
+    Default: 'AccountAccessRole'
+
+  snsTopicName:
+    Description: Enter the SNS Topic name
+    Type: String
+    Default: SNSTopic
+
+  policyARN:
+    Description: Enter the Policy ARN which will get detached from role
+    Type: String
+    Default: 'arn:aws:iam::aws:policy/AdministratorAccess'
+
+  budgetName:
+    Description: The name of the budget
+    Type: String
+    Default: Budget
+  
+  budgetAmount:
+    Description: What your budget per month
+    Type: Number
+  
+  budgetThreshold:
+    Description: The first threshold at which you'll receive a notification
+    Type: Number
+    Default: 100
+  
+  budgetEmail1:
+    Description: The email address to send notifications
+    Type: String
+    AllowedPattern: '\S+@\S+\.\S+'
+    MinLength: 5
+
+  budgetEmail2:
+    Description: The email address to send notifications
+    Type: String
+    AllowedPattern: '\S+@\S+\.\S+'
+    MinLength: 5
+
+
+Resources:
+
+  crossAccountRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Ref crossAccountRoleName
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Action: sts:AssumeRole
+          Principal:
+            AWS: !Ref masterAccountID
+      ManagedPolicyArns:
+      - !Ref policyARN
+
+  lambdaExecuteRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+            Effect: "Allow"
+            Principal:
+              Service:
+                - "lambda.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      Policies:
+      - PolicyName: LambdaAccessRole
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+            Effect: Allow
+            Action: "*"
+            Resource: "*"
+  
+  lambdaFunc:
+    Type: "AWS::Lambda::Function"
+    DependsOn: 
+      - lambdaExecuteRole
+    Properties:
+      FunctionName: lambdaFunction
+      Handler: "Lambda.main"
+      Runtime: "python3.9"
+      Role: !GetAtt lambdaExecuteRole.Arn
+      Timeout: 600
+      TracingConfig:
+          Mode: "Active"
+      Code:
+        ZipFile: |
+          import os
+          import json
+          import logging
+          import pprint
+          import boto3
+          from botocore.exceptions import ClientError
+          
+          logger = logging.getLogger()
+          iam = boto3.resource('iam')
+          
+          def detach_policy(role_name, policy_arn):
+          
+              """   Detaches a policy from a role.   """
+              
+              try:
+                  iam.Role(role_name).detach_policy(PolicyArn=policy_arn)
+                  logger.info("Detached policy %s from role %s.", policy_arn, role_name)
+              except ClientError:
+                  logger.exception(
+                      "Couldn't detach policy %s from role %s.", policy_arn, role_name)
+                  raise
+          
+          def lambda_handler(event,context):
+          
+              role_name = 'AccountAccessRole'
+              policy_arn = os.environ['policy_arn']
+              detach_policy(role_name, policy_arn)
+              print("Detached policy {policy_arn} from {role_name}.")
+      Environment:
+        Variables:
+          policy_arn: !Ref policyARN
+
+  lambdaTopic:
+    Type: AWS::SNS::Topic
+    DependsOn: 
+      - lambdaFunc
+    Properties:
+      TopicName: !Ref snsTopicName
+      DisplayName: SNS Topic that invokes the Lambda function
+      Subscription:
+        - Endpoint: !Ref lambdaFunc
+          Protocol: lambda
+  
+  topicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    DependsOn: 
+      - lambdaTopic
+    Properties:
+      PolicyDocument:
+        Statement:
+          - Sid: AWSBudgets-notification
+            Effect: Allow
+            Action: 'sns:Publish'
+            Principal:
+              Service:
+                - budgets.amazonaws.com
+            Resource:
+              - !Ref lambdaTopic
+      Topics:
+        - !Ref lambdaTopic
+
+  lambdaPermission:
+    Type: AWS::Lambda::Permission
+    DependsOn: 
+      - lambdaFunc
+      - lambdaTopic
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref lambdaFunc
+      Principal: sns.amazonaws.com
+      SourceArn: !Ref lambdaTopic
+
+  accountBudget:
+    Type: AWS::Budgets::Budget
+    DependsOn: 
+      - lambdaTopic
+      - topicPolicy
+    Properties:
+      Budget:
+        BudgetName: !Ref budgetName
+        BudgetLimit:
+          Amount: !Ref budgetAmount
+          Unit: USD
+        TimeUnit: MONTHLY
+        BudgetType: COST
+      NotificationsWithSubscribers:
+        - Notification:
+            ComparisonOperator: GREATER_THAN
+            NotificationType: ACTUAL
+            Threshold: !Ref budgetThreshold
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: EMAIL
+              Address: !Ref budgetEmail1
+            - SubscriptionType: EMAIL
+              Address: !Ref budgetEmail2
+            - SubscriptionType: SNS
+              Address: !Ref lambdaTopic
+
+
+Outputs:
+  
+  SNSTopic: 
+    Description: Arn for SNS topic
+    Value: !Ref lambdaTopic
+
+  LambdaFunction: 
+    Description: Arn for Lambda Function
+    Value: !Ref lambdaFunc
