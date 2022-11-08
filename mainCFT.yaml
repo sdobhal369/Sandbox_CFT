@@ -5,11 +5,11 @@ Description: CFT Stack set to deploy automated solution (Create IAM Role inside 
 Parameters:
 
   masterAccountID:
-    Description: Master Account Number which other user will assume to get access in another account
+    Description: Master Account Number from which other user will assume role to get access of another account
     Type: String
 
   crossAccountRoleName:
-    Description: 'Your Role Name need to be the same across all of the Member Accounts'
+    Description: Your Role Name need to be the same across all of the Member Accounts
     Type: String
     Default: 'AccountAccessRole'
 
@@ -29,8 +29,12 @@ Parameters:
     Default: Budget
   
   budgetAmount:
-    Description: What your budget per month
+    Description: What is your budget per month/day
     Type: Number
+    
+  budgetTimeUnit:
+    Description: What is your budget calculation time cycle (month/day)
+    Type: String
   
   budgetThreshold:
     Description: The first threshold at which you'll receive a notification
@@ -184,7 +188,7 @@ Resources:
         BudgetLimit:
           Amount: !Ref budgetAmount
           Unit: USD
-        TimeUnit: MONTHLY
+        TimeUnit: !Ref budgetTimeUnit
         BudgetType: COST
       NotificationsWithSubscribers:
         - Notification:
