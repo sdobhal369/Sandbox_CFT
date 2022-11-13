@@ -1,0 +1,53 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Creating IAM Policy in Master Account to assume Role of another account
+
+
+Parameters:
+
+  account1:
+    Description: First Account Number to Assume Role
+    Type: String
+
+  account2:
+    Description: Second Account Number to Assume Role
+    Type: String
+
+  account3:
+    Description: Third Account Number to Assume Role
+    Type: String
+
+
+Resources:
+  
+  iamPolicy1:
+    Type: AWS::IAM::Policy
+    Properties: 
+      PolicyName: !Sub '${account1}-iamPolicy'
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Action: sts:AssumeRole
+          Resource: !Sub 'arn:aws:iam::${account1}:role/AccountAccessRole'
+
+  iamPolicy2:
+    Type: AWS::IAM::Policy
+    Properties: 
+      PolicyName: !Sub '${account2}-iamPolicy'
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Action: sts:AssumeRole
+          Resource: !Sub 'arn:aws:iam::${account2}:role/AccountAccessRole'
+
+  iamPolicy3:
+    Type: AWS::IAM::Policy
+    Properties: 
+      PolicyName: !Sub '${account3}-iamPolicy'
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Action: sts:AssumeRole
+          Resource: !Sub 'arn:aws:iam::${account3}:role/AccountAccessRole'
